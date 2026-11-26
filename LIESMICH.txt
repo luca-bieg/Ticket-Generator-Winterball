@@ -2,5 +2,5 @@ TICKET-GENERATOR (nur für dich, zum Erzeugen und Drucken)
 1. ZIP entpacken, den INHALT (nicht den Ordner) in ein neues GitHub-Repo hochladen, z. B. "winterball-generator"
 2. Repo -> Settings -> Pages -> Branch "main", Ordner "/ (root)" -> Save
 3. Adresse öffnen: https://DEINNAME.github.io/winterball-generator/
-4. Vorlage "Meet me at Midnight" ist voreingestellt. Anzahl eintragen, "Tickets erzeugen", drucken (4 pro A4-Seite; für beidseitigen Druck "Rückseiten mitdrucken" anhaken), danach "Scanner-Datei herunterladen" (.json)
+4. Vorlage "Meet me at Midnight" ist voreingestellt. Anzahl eintragen, "Tickets erzeugen", dann "PDF zum Drucken erstellen" (A4, 4 Tickets pro Seite; für beidseitigen Druck vorher "Rückseiten mitdrucken" anhaken). Auf dem iPad öffnet sich das Teilen-Menü: "Drucken" wählen, Größe 100 %. Danach "Scanner-Datei herunterladen" (.json)
 Die Datei gaesteliste-....json brauchst du für den Scanner. Gut aufbewahren.

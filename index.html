@@ -130,7 +130,9 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
     <div class="panel">
       <h2>3 · Drucken und Scanner-Datei</h2>
       <div class="sum"><b id="sumN">0 Tickets</b><span id="sumNew"></span></div>
-      <button class="btn primary" id="bPrint">Drucken / als PDF sichern</button>
+      <button class="btn primary" id="bPdf">PDF zum Drucken erstellen</button>
+      <button class="btn" id="bPrint">Drucken über den Browser (kann abweichen)</button>
+      <p class="hint" id="pdfHint">Empfohlen: Das PDF hat exakt A4-Seiten mit 4 Tickets und druckt auf iPad, iPhone und Computer gleich. Beim Drucken „Tatsächliche Größe“ / „100 %“ wählen.</p>
       <button class="btn warn" id="bJson">Scanner-Datei herunterladen (.json)</button>
       <p class="hint"><b>Wichtig:</b> Ohne diese Datei kann der Scanner die Tickets nicht prüfen. Gut aufbewahren (z. B. in iCloud) und <b>nicht</b> öffentlich ins Internet stellen, sie enthält die Namen.</p>
       <label class="noprint" style="margin-top:14px"><input type="checkbox" id="onlyNew"> nur neue Tickets anzeigen und drucken</label>
@@ -1500,7 +1502,7 @@ function applyZoom() {
 }
 function syncTpl() {
   const ww = tpl() === 'ww';
-  $('#plainFields').hidden = ww; $('#wwHint').hidden = !ww; $('#backWrap').hidden = !ww;
+  $('#plainFields').hidden = ww; $('#wwHint').hidden = !ww; $('#backWrap').hidden = !ww; $('#bPdf').hidden = !ww; $('#pdfHint').hidden = !ww;
 }
 function render() {
   syncTpl();
@@ -1549,6 +1551,99 @@ $('#bGen').addEventListener('click', () => {
   $('#restored').hidden = false; $('#restored').className = 'notice';
   $('#restored').innerHTML = '<b>' + (names.length + extra) + ' Tickets erzeugt.</b> Jetzt <b>die Scanner-Datei herunterladen</b>, sonst lassen sich die Tickets nicht prüfen.';
 });
+
+/* ---------- PDF-Export (maßgenau, ohne Browser-Druck) ---------- */
+function b64ToBytes(durl) { const s = atob(durl.split(',')[1]), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+function jpegSize(u) {
+  let i = 2;
+  while (i < u.length - 9) {
+    if (u[i] !== 0xFF) { i++; continue; }
+    const m = u[i + 1];
+    if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) return { h: (u[i + 5] << 8) | u[i + 6], w: (u[i + 7] << 8) | u[i + 8] };
+    i += 2 + ((u[i + 2] << 8) | u[i + 3]);
+  }
+  throw new Error('JPEG-Größe nicht lesbar');
+}
+function buildPdf(tickets, withBack) {
+  const enc = new TextEncoder(), F = b64ToBytes(WW_FRONT), B = b64ToBytes(WW_BACK), fs = jpegSize(F), bs = jpegSize(B);
+  const PW = 595.276, PH = 841.89, TW = 190 / 25.4 * 72, IW = fs.w, IH = fs.h, TH = TW * IH / IW, S = TW / IW, SLOT = PH / 4, X0 = (PW - TW) / 2;
+  const f2 = (v) => v.toFixed(2);
+  const pages = [];
+  for (let i = 0; i < tickets.length; i += 4) {
+    const part = tickets.slice(i, i + 4);
+    pages.push({ front: true, tickets: part });
+    if (withBack) pages.push({ front: false, tickets: part });
+  }
+  function pageContent(pg) {
+    let c = '';
+    pg.tickets.forEach((t, idx) => {
+      const yb = PH - idx * SLOT - SLOT / 2 - TH / 2;
+      const PX = (px) => X0 + px * S, PY = (py) => yb + (IH - py) * S;
+      c += 'q ' + f2(TW) + ' 0 0 ' + f2(TH) + ' ' + f2(X0) + ' ' + f2(yb) + ' cm ' + (pg.front ? '/ImF' : '/ImB') + ' Do Q\n';
+      c += 'q 0.62 G 0.4 w [3 3] 0 d ' + f2(X0 - 3) + ' ' + f2(yb - 3) + ' ' + f2(TW + 6) + ' ' + f2(TH + 6) + ' re S Q\n';
+      if (!pg.front) return;
+      // QR: weiße Fläche + schwarze Module als Vektor
+      const q = new QRCodeEncoder(2, 3); q.addData(t.code); q.make();
+      const n = q.getModuleCount(), bx = 1517, by = 194, bsz = 232, m = bsz / (n + 8);
+      c += '1 1 1 rg ' + f2(PX(bx)) + ' ' + f2(PY(by + bsz)) + ' ' + f2(bsz * S) + ' ' + f2(bsz * S) + ' re f\n0 0 0 rg\n';
+      for (let r = 0; r < n; r++) {
+        let col = 0;
+        while (col < n) {
+          if (q.isDark(r, col)) {
+            const s0 = col; while (col < n && q.isDark(r, col)) col++;
+            const px = bx + (s0 + 4) * m, py = by + (r + 4) * m;
+            c += f2(PX(px)) + ' ' + f2(PY(py + m) - 0.02) + ' ' + f2((col - s0) * m * S) + ' ' + f2(m * S + 0.04) + ' re\n';
+          } else col++;
+        }
+      }
+      c += 'f\n';
+      // Nummer (Times Bold) und Code (Courier Bold), weiß, mittig im Abriss
+      const cx = 1633, num = String(t.n).padStart(3, '0'), nfs = 60 * S, nw = num.length * 0.5 * nfs;
+      c += 'BT 1 1 1 rg /F1 ' + f2(nfs) + ' Tf 0 Tc ' + f2(PX(cx) - nw / 2) + ' ' + f2(PY(176)) + ' Td (' + num + ') Tj ET\n';
+      const cfs = 25 * S, tc = 0.14 * cfs, cw = 9 * 0.6 * cfs + 8 * tc, code = t.code.slice(0, 4) + '-' + t.code.slice(4);
+      c += 'BT 1 1 1 rg /F2 ' + f2(cfs) + ' Tf ' + f2(tc) + ' Tc ' + f2(PX(cx) - cw / 2) + ' ' + f2(PY(453)) + ' Td (' + code + ') Tj ET\n';
+    });
+    return c;
+  }
+  const chunks = [], offs = []; let len = 0;
+  const w = (x) => { const u = typeof x === 'string' ? enc.encode(x) : x; chunks.push(u); len += u.length; };
+  w(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34, 0x0A, 0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A]));
+  const obj = (n, fn) => { offs[n] = len; w(n + ' 0 obj\n'); fn(); w('\nendobj\n'); };
+  const kids = pages.map((_, i) => (8 + 2 * i) + ' 0 R').join(' ');
+  obj(1, () => w('<< /Type /Catalog /Pages 2 0 R >>'));
+  obj(2, () => w('<< /Type /Pages /Kids [' + kids + '] /Count ' + pages.length + ' >>'));
+  obj(3, () => w('<< /Type /Font /Subtype /Type1 /BaseFont /Times-Bold /Encoding /WinAnsiEncoding >>'));
+  obj(4, () => w('<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold /Encoding /WinAnsiEncoding >>'));
+  const img = (n, u, s) => obj(n, () => { w('<< /Type /XObject /Subtype /Image /Width ' + s.w + ' /Height ' + s.h + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + u.length + ' >>\nstream\n'); w(u); w('\nendstream'); });
+  img(5, F, fs); img(6, B, bs);
+  pages.forEach((pg, i) => {
+    const cn = 7 + 2 * i, pn = 8 + 2 * i, content = enc.encode(pageContent(pg));
+    obj(cn, () => { w('<< /Length ' + content.length + ' >>\nstream\n'); w(content); w('\nendstream'); });
+    obj(pn, () => w('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + PW + ' ' + PH + '] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> /XObject << /ImF 5 0 R /ImB 6 0 R >> >> /Contents ' + cn + ' 0 R >>'));
+  });
+  const total = 7 + 2 * pages.length, xpos = len;
+  let x = 'xref\n0 ' + total + '\n0000000000 65535 f \n';
+  for (let i = 1; i < total; i++) x += String(offs[i]).padStart(10, '0') + ' 00000 n \n';
+  w(x + 'trailer\n<< /Size ' + total + ' /Root 1 0 R >>\nstartxref\n' + xpos + '\n%%EOF\n');
+  return new Blob(chunks, { type: 'application/pdf' });
+}
+$('#bPdf').addEventListener('click', async () => {
+  const vis = visibleTickets();
+  if (!vis.length) return toast('Erst Tickets erzeugen.');
+  if (tpl() !== 'ww') { toast('Für „Schlicht“ bitte den Browser-Druck nutzen.'); return; }
+  persist();
+  let blob;
+  try { blob = buildPdf(vis, $('#withBack').checked); } catch (e) { return toast('PDF konnte nicht erstellt werden: ' + e.message); }
+  const now = new Date(), stamp = now.toISOString().slice(0, 10) + '_' + String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0');
+  const file = new File([blob], 'tickets-' + slug(list.event) + '-' + stamp + '.pdf', { type: 'application/pdf' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'Tickets' }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 20000);
+  toast('PDF gespeichert. Zum Drucken öffnen und „Drucken“ wählen.');
+});
+
 $('#bPrint').addEventListener('click', () => {
   if (!list.tickets.length) return toast('Erst Tickets erzeugen.');
   persist(); window.print();
